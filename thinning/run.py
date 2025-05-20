@@ -171,7 +171,7 @@ if __name__ == "__main__":
                         help='Batch size for training and evaluation')
     parser.add_argument('--epochs', type=int, default=50,
                         help='Number of epochs to train')
-    parser.add_argument('--learning_rate', type=float, default=0.001,
+    parser.add_argument('--learning_rate', type=float, default=0.01,
                         help='Learning rate')
     parser.add_argument('--num_workers', type=int, default=2,
                         help='Number of worker threads for data loading')

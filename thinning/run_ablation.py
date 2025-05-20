@@ -22,7 +22,7 @@ def main():
     # Training parameters
     parser.add_argument('--batch_size', type=int, default=16,
                         help='Batch size for training and evaluation')
-    parser.add_argument('--epochs', type=int, default=1,
+    parser.add_argument('--epochs', type=int, default=10,
                         help='Number of epochs to train (abbreviated for ablation study)')
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of worker threads for data loading')
@@ -100,8 +100,14 @@ def main():
     start_time = time.time()
 
     # Run the ablation study
-    from ablation_study import run_ablation_study
-    run_ablation_study(ablation_args)
+    try:
+        from ablation_study import run_ablation_study
+        run_ablation_study(ablation_args)
+    except Exception as e:
+        print(f"\nError during ablation study: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\nTrying to continue with remaining configurations...")
 
     # Calculate and print total execution time
     total_time = time.time() - start_time

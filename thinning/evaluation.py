@@ -31,14 +31,21 @@ def evaluate(args):
     # Get model and load weights
     if hasattr(args, 'compatibility_mode') and args.compatibility_mode:
         print("Using compatibility mode for model loading")
-        # Dynamically import UNetModel from ablation_study
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        from ablation_study import UNetModel
-        
-        model = UNetModel(n_channels=1, n_classes=1)
-        model.load_state_dict(torch.load(args.model_path))
+        try:
+            # Dynamically import UNetModel from ablation_study
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            from ablation_study import UNetModel
+            
+            model = UNetModel(n_channels=1, n_classes=1)
+            state_dict = torch.load(args.model_path)
+            model.load_state_dict(state_dict)
+            print("Successfully loaded model in compatibility mode")
+        except Exception as e:
+            print(f"Error in compatibility mode: {e}")
+            print("Falling back to standard model loading with architecture detection")
+            model = get_model(args.model_path)
     else:
         model = get_model(args.model_path)
     

@@ -130,6 +130,80 @@ class UNet(nn.Module):
         return self.sigmoid(logits)
     
     
+def detect_model_architecture(state_dict):
+    """
+    Detect the architecture parameters of a saved model based on its state dict
+    
+    Args:
+        state_dict (dict): State dict of the saved model
+        
+    Returns:
+        dict: Architecture parameters including bilinear upsampling and factor
+    """
+    # Check if it's a UNetModel from ablation_study or UNet
+    is_ablation_model = any('down_layers' in key for key in state_dict.keys())
+    
+    # Detect if using bilinear upsampling
+    bilinear = True  # Default value
+    
+    # Detect model size (standard or different channel sizes)
+    # Check the dimension of the bottleneck layer
+    if is_ablation_model:
+        # For UNetModel from ablation_study.py
+        bottleneck_key = None
+        for key in state_dict.keys():
+            if 'down_layers.3.maxpool_conv.1.double_conv.0.weight' in key:
+                bottleneck_key = key
+                break
+    else:
+        # For UNet from unet.py
+        bottleneck_key = 'down4.maxpool_conv.1.double_conv.0.weight'
+    
+    if bottleneck_key and bottleneck_key in state_dict:
+        bottleneck_size = state_dict[bottleneck_key].shape[0]  # Output channels
+        input_size = state_dict[bottleneck_key].shape[1]  # Input channels
+        
+        # Determine if bilinear mode was used (affects the network structure)
+        # In bilinear mode, bottleneck is typically half the size (i.e., 512 instead of 1024)
+        factor = 2 if bottleneck_size < 1024 else 1
+        
+        print(f"Detected bottleneck size: {bottleneck_size}, input size: {input_size}")
+        print(f"Detected factor: {factor} (bilinear: {bilinear})")
+    else:
+        print("Could not detect bottleneck size, using default architecture")
+        factor = 2  # Default factor for bilinear upsampling
+    
+    return {
+        'bilinear': bilinear,
+        'factor': factor,
+        'is_ablation_model': is_ablation_model
+    }
+
+def get_model_matching_architecture(arch_params):
+    """
+    Create a U-Net model with the architecture matching the detected parameters
+    
+    Args:
+        arch_params (dict): Architecture parameters
+        
+    Returns:
+        nn.Module: U-Net model with the specified architecture
+    """
+    model = UNet(n_channels=1, n_classes=1, bilinear=arch_params['bilinear'])
+    
+    if arch_params['factor'] != 2:
+        # Modify the architecture to match the factor
+        print(f"Creating model with non-default factor: {arch_params['factor']}")
+        model.down4 = Down(512, 1024)  # Use full size bottleneck
+        
+        # Update the upsampling path with the corresponding sizes
+        model.up1 = Up(1024 + 512, 512, arch_params['bilinear'])
+        model.up2 = Up(512 + 256, 256, arch_params['bilinear'])
+        model.up3 = Up(256 + 128, 128, arch_params['bilinear'])
+        model.up4 = Up(128 + 64, 64, arch_params['bilinear'])
+    
+    return model
+
 def get_model(pretrained_path=None):
     """
     Get a U-Net model, optionally loading pretrained weights
@@ -140,46 +214,88 @@ def get_model(pretrained_path=None):
     Returns:
         torch.nn.Module: U-Net model
     """
+    # Create a default model first
     model = UNet(n_channels=1, n_classes=1)
     
     if pretrained_path and os.path.exists(pretrained_path):
+        print(f"Loading model from {pretrained_path}...")
+        
+        # Load the state dict first to analyze architecture
+        state_dict = torch.load(pretrained_path)
+        
         try:
-            model.load_state_dict(torch.load(pretrained_path))
-            print(f"Loaded pretrained model from {pretrained_path}")
+            # Try direct loading first
+            model.load_state_dict(state_dict)
+            print(f"Successfully loaded model weights directly")
         except RuntimeError as e:
-            print(f"Error loading model weights. Attempting to adapt weights format...")
-            # Try to load weights with different structure (from UNetModel in ablation_study.py)
-            state_dict = torch.load(pretrained_path)
-            new_state_dict = {}
+            print(f"Direct loading failed. Detecting model architecture...")
             
-            # Map between UNetModel structure and UNet structure
-            key_mapping = {
-                'inc': 'inc',
-                'down_layers.0': 'down1',
-                'down_layers.1': 'down2', 
-                'down_layers.2': 'down3',
-                'down_layers.3': 'down4',
-                'up_layers.0': 'up1',
-                'up_layers.1': 'up2',
-                'up_layers.2': 'up3',
-                'up_layers.3': 'up4',
-                'outc': 'outc',
-                'sigmoid': 'sigmoid'
-            }
+            # Detect architecture from the state dict
+            arch_params = detect_model_architecture(state_dict)
             
-            for key in state_dict:
-                for old_key_prefix, new_key_prefix in key_mapping.items():
-                    if key.startswith(old_key_prefix):
-                        new_key = key.replace(old_key_prefix, new_key_prefix, 1)
-                        new_state_dict[new_key] = state_dict[key]
-                        break
-            
-            # Load the transformed state dict
-            missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
-            if missing:
-                print(f"Warning: Missing keys: {missing}")
-            if unexpected:
-                print(f"Warning: Unexpected keys: {unexpected}")
-            print("Successfully adapted model weights")
+            # Create a model with matching architecture
+            if arch_params['is_ablation_model']:
+                # For UNetModel from ablation_study.py
+                print("Adapting weights from UNetModel structure...")
+                new_state_dict = {}
+                
+                # Map between UNetModel structure and UNet structure
+                key_mapping = {
+                    'inc': 'inc',
+                    'down_layers.0': 'down1',
+                    'down_layers.1': 'down2', 
+                    'down_layers.2': 'down3',
+                    'down_layers.3': 'down4',
+                    'up_layers.0': 'up1',
+                    'up_layers.1': 'up2',
+                    'up_layers.2': 'up3',
+                    'up_layers.3': 'up4',
+                    'outc': 'outc',
+                    'sigmoid': 'sigmoid'
+                }
+                
+                for key in state_dict:
+                    for old_key_prefix, new_key_prefix in key_mapping.items():
+                        if key.startswith(old_key_prefix):
+                            new_key = key.replace(old_key_prefix, new_key_prefix, 1)
+                            new_state_dict[new_key] = state_dict[key]
+                            break
+                
+                # Create a model with the appropriate architecture
+                model = get_model_matching_architecture(arch_params)
+                
+                # Try loading the adapted state dict
+                missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
+                
+                if missing:
+                    print(f"Warning: Missing keys: {len(missing)} keys")
+                    if len(missing) < 10:  # Print if few keys are missing
+                        print(missing)
+                
+                if unexpected:
+                    print(f"Warning: Unexpected keys: {len(unexpected)} keys")
+                    if len(unexpected) < 10:  # Print if few unexpected keys
+                        print(unexpected)
+                
+                print("Successfully adapted model weights with architecture matching")
+            else:
+                # For UNet with different architecture parameters
+                print("Recreating model with matching architecture parameters...")
+                model = get_model_matching_architecture(arch_params)
+                
+                try:
+                    model.load_state_dict(state_dict)
+                    print("Successfully loaded weights with matching architecture")
+                except RuntimeError as e2:
+                    print(f"Still encountering issues: {e2}")
+                    print("Loading with strict=False to get partial weights...")
+                    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+                    
+                    if missing:
+                        print(f"Warning: Missing keys: {len(missing)} keys")
+                    if unexpected:
+                        print(f"Warning: Unexpected keys: {len(unexpected)} keys")
+                    
+                    print("Loaded partial weights, model may not perform as expected")
         
     return model

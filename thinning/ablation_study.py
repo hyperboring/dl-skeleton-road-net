@@ -29,10 +29,10 @@ CONFIGURATIONS = {
     "lr_0.01": {"learning_rate": 0.01, "loss": "combined", "architecture": "standard"},
 
     # Vary loss function
-    "loss_bce": {"learning_rate": 0.001, "loss": "bce", "architecture": "standard"},
-    "loss_dice": {"learning_rate": 0.001, "loss": "dice", "architecture": "standard"},
-    "loss_combined": {"learning_rate": 0.001, "loss": "combined", "architecture": "standard"},
-    "loss_weighted": {"learning_rate": 0.001, "loss": "weighted", "architecture": "standard"},
+    "loss_bce": {"learning_rate": 0.01, "loss": "bce", "architecture": "standard"},
+    "loss_dice": {"learning_rate": 0.01, "loss": "dice", "architecture": "standard"},
+    "loss_combined": {"learning_rate": 0.01, "loss": "combined", "architecture": "standard"},
+    "loss_weighted": {"learning_rate": 0.01, "loss": "weighted", "architecture": "standard"},
 
     # Vary architecture
     # "arch_small": {"learning_rate": 0.001, "loss": "combined", "architecture": "small"},
@@ -118,11 +118,12 @@ class OutConv(nn.Module):
 class UNetModel(nn.Module):
     """U-Net architecture with configurable parameters for ablation study"""
 
-    def __init__(self, n_channels=1, n_classes=1, architecture="standard"):
+    def __init__(self, n_channels=1, n_classes=1, architecture="standard", bilinear_override=None):
         super(UNetModel, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
-
+        self.architecture = architecture
+    
         # Set architecture parameters
         if architecture == "small":
             # Smaller model with fewer channels
@@ -146,6 +147,11 @@ class UNetModel(nn.Module):
             bilinear = False
         else:
             raise ValueError(f"Unknown architecture: {architecture}")
+        
+        # Allow bilinear mode to be overridden (for compatibility)
+        if bilinear_override is not None:
+            bilinear = bilinear_override
+            print(f"Overriding bilinear mode to: {bilinear}")
 
         self.bilinear = bilinear
         self.channels = channels
